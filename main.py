@@ -53,9 +53,10 @@ def get_connected_wallets(transactions: List, max: int= 50) -> List[str]:
     connected_wallets = {}
     discovered = 0
     checked_transactions = 0
+    status_placeholder = st.empty() # streamlit placeholder for status
     for txn in transactions:
         checked_transactions += 1
-        print(f"Discovered {discovered} wallets")
+        status_placeholder.text(f"Discovered {discovered} wallets")
         if discovered >= max:
             break
         if checked_transactions > 10:
