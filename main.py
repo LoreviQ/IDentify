@@ -6,6 +6,7 @@ import networkx as nx
 from sklearn.cluster import DBSCAN
 import numpy as np
 import matplotlib.pyplot as plt  
+import streamlit as st
 
 def main(wallet_address):
     transactions = get_transactions(wallet_address)
@@ -112,7 +113,52 @@ def draw_graph(wallet_graph):
     plt.savefig('wallet_graph.png')
     plt.close() 
 
-def main(wallet_address):
+def streamlit_host():
+    st.title("Solana Wallet Graph")
+    wallet_address = st.text_input(
+        "Enter Solana Wallet Address",
+        value="EJwrQpygnFry5a2kYsdK9CoebZ5w3vDLSqs6KHq8Baam"
+    )
+    if st.button("Generate Graph"):
+        with st.spinner("Fetching transactions..."):
+            transactions = get_transactions(wallet_address)
+            
+        with st.spinner("Analyzing connected wallets... (This takes a while since the free solana api has harsh rate limits, sorry)"):
+            connected_wallets = get_connected_wallets(transactions)
+            if wallet_address in connected_wallets:
+                del connected_wallets[wallet_address]
+            
+        with st.spinner("Building graph..."):
+            wallet_graph = build_wallet_graph(wallet_address, connected_wallets)
+            
+            # Create matplotlib figure
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Draw the graph
+            edges = wallet_graph.edges()
+            weights = [wallet_graph[u][v]['weight'] for u,v in edges]
+            labels = {node: node[:6] + "..." for node in wallet_graph.nodes()}
+            
+            nx.draw(wallet_graph,
+                   labels=labels,
+                   with_labels=True,
+                   node_color='lightblue',
+                   node_size=1500,
+                   font_size=8,
+                   width=weights,
+                   font_weight='bold',
+                   ax=ax)
+            
+            # Display the graph in Streamlit
+            st.pyplot(fig)
+            
+            # Optional: Display connected wallets as a table
+            st.subheader("Connected Wallets")
+            wallet_data = [[wallet, count] for wallet, count in connected_wallets.items()]
+            st.table({"Wallet": [w[0] for w in wallet_data],
+                     "Interactions": [w[1] for w in wallet_data]})
+
+def test(wallet_address):
     transactions = get_transactions(wallet_address)
     connected_wallets = get_connected_wallets(transactions)
     del connected_wallets[wallet_address]
@@ -120,5 +166,4 @@ def main(wallet_address):
     draw_graph(wallet_graph)
 
 if __name__ == "__main__":
-    test_adress = "EJwrQpygnFry5a2kYsdK9CoebZ5w3vDLSqs6KHq8Baam"
-    main(test_adress)
+    streamlit_host()
