@@ -1,0 +1,7 @@
+streamlit
+solana-sdk
+solders
+networkx
+matplotlib
+pandas
+streamlit-agraph
