@@ -113,7 +113,7 @@ def get_connected_wallets(transactions: List, max: int = END_AFTER) -> pd.DataFr
                     existing_wallet['sql_change'] += sql_change
                     # Merge token changes
                     for mint, amount in token_dict.items():
-                        if mint not in existing_wallet['token_changes']:
+                        if mint not in existing_wallet['token_change']:
                             existing_wallet['token_change'][mint] = amount
                         else:
                             existing_wallet['token_change'][mint] += amount
@@ -142,6 +142,7 @@ def calculate_weight(wallets):
     return df
 
 def streamlit_graph(wallet, df_related_wallets):
+    """Builds a Streamlit AGraph from a wallet and related wallet DataFrame"""
     nodes = []
     edges = []
     
@@ -203,6 +204,7 @@ def build_wallet_graph(wallet, df_related_wallets):
     return G
 
 def draw_graph(wallet_graph):
+    """Saves a graph locally, for debugging purposes"""
     edges = wallet_graph.edges()
     weights = [wallet_graph[u][v]['weight'] for u,v in edges]
     labels = {node: node[:6] + "..." for node in wallet_graph.nodes()}
@@ -219,6 +221,7 @@ def draw_graph(wallet_graph):
     plt.close() 
 
 def streamlit_host():
+    """Main Streamlit app"""
     st.title("Solana Wallet Graph")
     wallet_address = st.text_input(
         "Enter Solana Wallet Address",
@@ -251,6 +254,7 @@ def streamlit_host():
         st.error(str(e))
 
 def test(wallet_address):
+    """Test function for debugging purposes"""
     transactions = get_transactions(wallet_address)
     connected_wallets = get_connected_wallets(transactions)
     del connected_wallets[wallet_address]
