@@ -2,6 +2,29 @@ from solana.rpc.api import Client
 from solders.pubkey import Pubkey
 import time
 from typing import List
+import networkx as nx
+from sklearn.cluster import DBSCAN
+import numpy as np
+import matplotlib.pyplot as plt  
+
+def main(wallet_address):
+    transactions = get_transactions(wallet_address)
+    connected_wallets = get_connected_wallets(transactions)
+    wallet_graph = build_wallet_graph(wallet_address, connected_wallets)
+    
+    # Create a new figure
+    plt.figure(figsize=(12, 8))
+    
+    # Draw the graph
+    nx.draw(wallet_graph, 
+           with_labels=True,
+           node_color='lightblue',
+           node_size=1500,
+           font_size=8,
+           font_weight='bold')
+    
+    # Show the plot
+    plt.show()
 
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 MAX_RETRIES = 3
@@ -49,12 +72,30 @@ def get_connected_wallets(transactions: List, max: int= 10) -> List[str]:
                 discovered += 1
     return list(connected_wallets)
 
+def build_wallet_graph(wallet, related_wallets):
+    G = nx.Graph()
+    G.add_node(wallet)
+    for related in related_wallets:
+        G.add_edge(wallet, related)
+    return G
 
-def main():
-    test_adress = "EJwrQpygnFry5a2kYsdK9CoebZ5w3vDLSqs6KHq8Baam"
-    transactions = get_transactions(test_adress)
+def draw_graph(wallet_graph):
+    plt.figure(figsize=(12, 8))
+    nx.draw(wallet_graph, 
+           with_labels=True,
+           node_color='lightblue',
+           node_size=1500,
+           font_size=8,
+           font_weight='bold')
+    plt.savefig('wallet_graph.png')
+    plt.close() 
+    
+def main(wallet_address):
+    transactions = get_transactions(wallet_address)
     connected_wallets = get_connected_wallets(transactions)
-    print(connected_wallets)
+    wallet_graph = build_wallet_graph(wallet_address, connected_wallets)
+    draw_graph(wallet_graph)
 
 if __name__ == "__main__":
-    main()
+    test_adress = "EJwrQpygnFry5a2kYsdK9CoebZ5w3vDLSqs6KHq8Baam"
+    main(test_adress)
