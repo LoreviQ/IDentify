@@ -28,7 +28,7 @@ def main(wallet_address):
 
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 MAX_RETRIES = 3
-RATE_LIMIT_DELAY = 1  # 500ms delay between requests
+RATE_LIMIT_DELAY = 2
 
 solana_client = Client(SOLANA_RPC_URL, commitment="confirmed")
 
@@ -47,13 +47,17 @@ def get_transactions(wallet_address: str) -> List:
             time.sleep(RATE_LIMIT_DELAY * (attempt + 1))
 
 
-def get_connected_wallets(transactions: List, max: int= 10) -> List[str]:
+def get_connected_wallets(transactions: List, max: int= 50) -> List[str]:
     """Get connected wallets from transactions"""
     connected_wallets = {}
     discovered = 0
+    checked_transactions = 0
     for txn in transactions:
+        checked_transactions += 1
         print(f"Discovered {discovered} wallets")
         if discovered >= max:
+            break
+        if checked_transactions > 10:
             break
         # Add delay to respect rate limits
         time.sleep(RATE_LIMIT_DELAY)
@@ -95,8 +99,10 @@ def build_wallet_graph(wallet, related_wallets):
 def draw_graph(wallet_graph):
     edges = wallet_graph.edges()
     weights = [wallet_graph[u][v]['weight'] for u,v in edges]
+    labels = {node: node[:6] + "..." for node in wallet_graph.nodes()}
     plt.figure(figsize=(12, 8))
     nx.draw(wallet_graph, 
+           labels=labels,
            with_labels=True,
            node_color='lightblue',
            node_size=1500,
@@ -109,6 +115,7 @@ def draw_graph(wallet_graph):
 def main(wallet_address):
     transactions = get_transactions(wallet_address)
     connected_wallets = get_connected_wallets(transactions)
+    del connected_wallets[wallet_address]
     wallet_graph = build_wallet_graph(wallet_address, connected_wallets)
     draw_graph(wallet_graph)
 
