@@ -118,24 +118,33 @@ def get_connected_wallets(transactions: List, max: int= 5) -> pd.DataFrame:
                     
     return pd.DataFrame(wallet_data)
 
-def calculate_weight(data):
+def calculate_weight(wallets):
     """Calculate weight based on transaction count and balance"""
-    # currently just using transaction count
-    return data['transactions']
+    # Create a copy to avoid modifying original
+    df = wallets.copy()
+    
+    # Normalize transactions 
+    max_txn = df['transactions'].max()
+    min_txn = df['transactions'].min()
+    
+    if max_txn == min_txn:
+        df['weight'] = 1
+    else:
+        df['weight'] = 1 + ((df['transactions'] - min_txn) / (max_txn - min_txn)) * 9
+    
+    # In future you can add more metrics here, for example:
+    # if 'balance' in df.columns:
+    #     normalized_balance = (df['balance'] - df['balance'].min()) / (df['balance'].max() - df['balance'].min())
+    #     df['weight'] = df['weight'] * 0.7 + normalized_balance * 0.3
+    
+    return df
 
 def streamlit_graph(wallet, df_related_wallets):
     nodes = []
     edges = []
     
-    # Scale transactions to reasonable edge widths
-    max_txn = df_related_wallets['transactions'].max()
-    min_txn = df_related_wallets['transactions'].min()
+    df_weighted = calculate_weight(df_related_wallets)
     
-    def scale_weight(transactions):
-        if max_txn == min_txn:
-            return 1
-        return 1 + ((transactions - min_txn) / (max_txn - min_txn)) * 9
-
     # Add main wallet node
     nodes.append(Node(
         id=wallet, 
@@ -147,7 +156,7 @@ def streamlit_graph(wallet, df_related_wallets):
     ))  
         
     # Add related wallet nodes and edges
-    for _, row in df_related_wallets.iterrows():
+    for _, row in df_weighted.iterrows():
         nodes.append(Node(
             id=row['wallet'],
             label=row['wallet'][:6]+"...",
@@ -159,7 +168,7 @@ def streamlit_graph(wallet, df_related_wallets):
         edges.append(Edge(
             source=wallet,
             target=row['wallet'],
-            width=scale_weight(row['transactions'])
+            width=row['weight']
         ))
     
     config = Config(
