@@ -3,33 +3,20 @@ from solders.pubkey import Pubkey
 import time
 from typing import List
 import networkx as nx
-from sklearn.cluster import DBSCAN
-import numpy as np
 import matplotlib.pyplot as plt  
 import streamlit as st
-
-def main(wallet_address):
-    transactions = get_transactions(wallet_address)
-    connected_wallets = get_connected_wallets(transactions)
-    wallet_graph = build_wallet_graph(wallet_address, connected_wallets)
-    
-    # Create a new figure
-    plt.figure(figsize=(12, 8))
-    
-    # Draw the graph
-    nx.draw(wallet_graph, 
-           with_labels=True,
-           node_color='lightblue',
-           node_size=1500,
-           font_size=8,
-           font_weight='bold')
-    
-    # Show the plot
-    plt.show()
+import pandas as pd
+from streamlit_agraph import agraph, Node, Edge, Config
 
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 MAX_RETRIES = 3
 RATE_LIMIT_DELAY = 2
+SYSTEM_PROGRAM_ADDRESSES = {
+    "11111111111111111111111111111111",  # System Program
+    "ComputeBudget111111111111111111111111111111", # Compute Budget
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", # Token Program
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", # Associated Token Program
+}
 
 solana_client = Client(SOLANA_RPC_URL, commitment="confirmed")
 
@@ -48,23 +35,21 @@ def get_transactions(wallet_address: str) -> List:
             time.sleep(RATE_LIMIT_DELAY * (attempt + 1))
 
 
-def get_connected_wallets(transactions: List, max: int= 50) -> List[str]:
-    """Get connected wallets from transactions"""
-    connected_wallets = {}
-    discovered = 0
+def get_connected_wallets(transactions: List, max: int= 5) -> pd.DataFrame:
+    """Get connected wallets from transactions, returns DataFrame with wallet details"""
+    wallet_data = []
     checked_transactions = 0
-    status_placeholder = st.empty() # streamlit placeholder for status
+    discovered = 0
+    status_placeholder = st.empty()
+    
     for txn in transactions:
         checked_transactions += 1
         status_placeholder.text(f"Discovered {discovered} wallets")
-        if discovered >= max:
+        if checked_transactions > max:
             break
-        if checked_transactions > 10:
-            break
-        # Add delay to respect rate limits
+            
         time.sleep(RATE_LIMIT_DELAY)
         
-        # Try to fetch transaction details with retries
         txn_details = None
         for attempt in range(MAX_RETRIES):
             try:
@@ -77,25 +62,133 @@ def get_connected_wallets(transactions: List, max: int= 50) -> List[str]:
                 if attempt == MAX_RETRIES - 1:
                     print(f"All attempts failed for transaction {txn.signature}")
                     continue
+            
         if txn_details and txn_details.value:
-            # Get accounts from transaction
             accounts = txn_details.value.transaction.transaction.message.account_keys
-            # Add all account addresses to connected wallets
-            for account in accounts:
-                account_str = str(account)
-                print(f"Discovered connected wallet: {account_str}")
-                if account_str in connected_wallets:
-                    connected_wallets[account_str] += 1
+            meta = txn_details.value.transaction.meta
+            pre_balances = meta.pre_balances
+            post_balances = meta.post_balances
+            pre_token_balances = meta.pre_token_balances if hasattr(meta, 'pre_token_balances') else []
+            post_token_balances = meta.post_token_balances if hasattr(meta, 'post_token_balances') else []
+            
+            token_changes = {}
+            for pre in pre_token_balances:
+                account_idx = pre.account_index
+                if account_idx not in token_changes:
+                    token_changes[account_idx] = {}
+                token_changes[account_idx][pre.mint] = -float(pre.ui_token_amount.amount)
+                
+            for post in post_token_balances:
+                account_idx = post.account_index
+                if account_idx not in token_changes:
+                    token_changes[account_idx] = {}
+                if post.mint in token_changes[account_idx]:
+                    token_changes[account_idx][post.mint] += float(post.ui_token_amount.amount)
                 else:
-                    connected_wallets[account_str] = 1
+                    token_changes[account_idx][post.mint] = float(post.ui_token_amount.amount)
+            
+            for idx, account in enumerate(accounts):
+                account_str = str(account)
+                if account_str in SYSTEM_PROGRAM_ADDRESSES:
+                    continue
+                    
+                sql_change = post_balances[idx] - pre_balances[idx]
+                token_dict = token_changes.get(idx, {})
+                
+                # Find existing wallet in data
+                existing_wallet = next((w for w in wallet_data if w['wallet'] == account_str), None)
+                
+                if existing_wallet is None:
+                    wallet_data.append({
+                        'wallet': account_str,
+                        'transactions': 1,
+                        'sql_change': sql_change,
+                        'token_change': token_dict
+                    })
                     discovered += 1
-    return connected_wallets
+                else:
+                    existing_wallet['transactions'] += 1
+                    existing_wallet['sql_change'] += sql_change
+                    # Merge token changes
+                    for mint, amount in token_dict.items():
+                        if mint not in existing_wallet['token_changes']:
+                            existing_wallet['token_change'][mint] = amount
+                        else:
+                            existing_wallet['token_change'][mint] += amount
+                    
+    return pd.DataFrame(wallet_data)
 
-def build_wallet_graph(wallet, related_wallets):
+def calculate_weight(data):
+    """Calculate weight based on transaction count and balance"""
+    # currently just using transaction count
+    return data['transactions']
+
+def streamlit_graph(wallet, df_related_wallets):
+    nodes = []
+    edges = []
+    
+    # Scale transactions to reasonable edge widths
+    max_txn = df_related_wallets['transactions'].max()
+    min_txn = df_related_wallets['transactions'].min()
+    
+    def scale_weight(transactions):
+        if max_txn == min_txn:
+            return 1
+        return 1 + ((transactions - min_txn) / (max_txn - min_txn)) * 9
+
+    # Add main wallet node
+    nodes.append(Node(
+        id=wallet, 
+        label=wallet[:6]+"...", 
+        size=25,
+        color="#00ff1e",  # Main wallet in green
+        labelColor="white",
+        font={'color': 'white', 'size': 16}
+    ))  
+        
+    # Add related wallet nodes and edges
+    for _, row in df_related_wallets.iterrows():
+        nodes.append(Node(
+            id=row['wallet'],
+            label=row['wallet'][:6]+"...",
+            size=20,
+            color="#97c2fc",
+            labelColor="white",
+            font={'color': 'white', 'size': 16}
+        ))
+        edges.append(Edge(
+            source=wallet,
+            target=row['wallet'],
+            width=scale_weight(row['transactions'])
+        ))
+    
+    config = Config(
+        width=750,
+        height=750,
+        directed=False,
+        physics=True,
+        hierarchical=False,
+        nodeHighlightBehavior=True,
+        backgroundColor="#222222",  # Dark background
+        linkHighlightBehavior=True,
+        highlightColor="#F7A7A6",
+        node={
+            'labelProperty': 'label', 
+            'renderLabel': True,
+    }
+    )
+    
+    return agraph(nodes=nodes, 
+                 edges=edges, 
+                 config=config)
+
+def build_wallet_graph(wallet, df_related_wallets):
+    """Build network graph from wallet and related wallet DataFrame"""
     G = nx.Graph()
     G.add_node(wallet)
-    for related, weight in related_wallets.items():
-        G.add_edge(wallet, related, weight=weight)
+    for _, row in df_related_wallets.iterrows():
+        weight = row['transactions']  # Using transactions as weight
+        G.add_edge(wallet, row['wallet'], weight=weight)
     return G
 
 def draw_graph(wallet_graph):
@@ -126,38 +219,19 @@ def streamlit_host():
             
         with st.spinner("Analyzing connected wallets... (This takes a while since the free solana api has harsh rate limits, sorry)"):
             connected_wallets = get_connected_wallets(transactions)
-            if wallet_address in connected_wallets:
-                del connected_wallets[wallet_address]
+            connected_wallets = connected_wallets[connected_wallets['wallet'] != wallet_address]
             
         with st.spinner("Building graph..."):
-            wallet_graph = build_wallet_graph(wallet_address, connected_wallets)
+            streamlit_graph(wallet_address, connected_wallets)
             
-            # Create matplotlib figure
-            fig, ax = plt.subplots(figsize=(12, 8))
-            
-            # Draw the graph
-            edges = wallet_graph.edges()
-            weights = [wallet_graph[u][v]['weight'] for u,v in edges]
-            labels = {node: node[:6] + "..." for node in wallet_graph.nodes()}
-            
-            nx.draw(wallet_graph,
-                   labels=labels,
-                   with_labels=True,
-                   node_color='lightblue',
-                   node_size=1500,
-                   font_size=8,
-                   width=weights,
-                   font_weight='bold',
-                   ax=ax)
-            
-            # Display the graph in Streamlit
-            st.pyplot(fig)
-            
-            # Optional: Display connected wallets as a table
-            st.subheader("Connected Wallets")
-            wallet_data = [[wallet, count] for wallet, count in connected_wallets.items()]
-            st.table({"Wallet": [w[0] for w in wallet_data],
-                     "Interactions": [w[1] for w in wallet_data]})
+        # Display connected wallets as a table
+        st.subheader("Connected Wallets")
+        connected_wallets_sorted = connected_wallets.sort_values('transactions', ascending=False)
+        display_df = connected_wallets_sorted.copy()
+        display_df['sql_change'] = display_df['sql_change'].apply(lambda x: f"{x/1e9:.3f} SOL")
+        display_df['token_change'] = display_df['token_change'].apply(lambda x: ', '.join([f"{amount:.3f} {mint}" for mint, amount in x.items()]) if x else '')
+        display_df.columns = ["Wallet", "Interactions", "SOL Change", "Token Changes"]
+        st.dataframe(display_df)
 
 def test(wallet_address):
     transactions = get_transactions(wallet_address)
