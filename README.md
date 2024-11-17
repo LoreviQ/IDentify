@@ -2,6 +2,8 @@
 
 IDentify is a web application that visualizes connections between Solana wallets by analyzing on-chain transactions and behavior. Think of it as a "six degrees of separation" explorer for crypto wallets!
 
+[Screencast from 2024-11-17 16-47-27.webm](https://github.com/user-attachments/assets/5401662f-1f71-4747-89a4-aa65cddf928b)
+
 ## 🌟 [Try It Live](https://identify-solana.streamlit.app/)
 
 ## What it Does
