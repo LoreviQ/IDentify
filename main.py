@@ -10,6 +10,7 @@ from streamlit_agraph import agraph, Node, Edge, Config
 
 SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
 MAX_RETRIES = 3
+END_AFTER = 5
 RATE_LIMIT_DELAY = 2
 SYSTEM_PROGRAM_ADDRESSES = {
     "11111111111111111111111111111111",  # System Program
@@ -20,6 +21,7 @@ SYSTEM_PROGRAM_ADDRESSES = {
 
 solana_client = Client(SOLANA_RPC_URL, commitment="confirmed")
 
+@st.cache_data(ttl=300)  # 5 minute cache
 def get_transactions(wallet_address: str) -> List:
     """Fetch confirmed transactions for the wallet"""
     pubkey = Pubkey.from_string(wallet_address)
@@ -35,7 +37,7 @@ def get_transactions(wallet_address: str) -> List:
             time.sleep(RATE_LIMIT_DELAY * (attempt + 1))
 
 
-def get_connected_wallets(transactions: List, max: int= 5) -> pd.DataFrame:
+def get_connected_wallets(transactions: List, max: int = END_AFTER) -> pd.DataFrame:
     """Get connected wallets from transactions, returns DataFrame with wallet details"""
     wallet_data = []
     checked_transactions = 0
@@ -222,25 +224,31 @@ def streamlit_host():
         "Enter Solana Wallet Address",
         value="EJwrQpygnFry5a2kYsdK9CoebZ5w3vDLSqs6KHq8Baam"
     )
-    if st.button("Generate Graph"):
-        with st.spinner("Fetching transactions..."):
-            transactions = get_transactions(wallet_address)
-            
-        with st.spinner("Analyzing connected wallets... (This takes a while since the free solana api has harsh rate limits, sorry)"):
-            connected_wallets = get_connected_wallets(transactions)
-            connected_wallets = connected_wallets[connected_wallets['wallet'] != wallet_address]
-            
-        with st.spinner("Building graph..."):
-            streamlit_graph(wallet_address, connected_wallets)
-            
-        # Display connected wallets as a table
-        st.subheader("Connected Wallets")
-        connected_wallets_sorted = connected_wallets.sort_values('transactions', ascending=False)
-        display_df = connected_wallets_sorted.copy()
-        display_df['sql_change'] = display_df['sql_change'].apply(lambda x: f"{x/1e9:.3f} SOL")
-        display_df['token_change'] = display_df['token_change'].apply(lambda x: ', '.join([f"{amount:.3f} {mint}" for mint, amount in x.items()]) if x else '')
-        display_df.columns = ["Wallet", "Interactions", "SOL Change", "Token Changes"]
-        st.dataframe(display_df)
+    try:
+        if not len(wallet_address) == 44:  # Basic Solana address validation
+            st.error("Please enter a valid Solana wallet address")
+            return
+        if st.button("Generate Graph"):
+            with st.spinner("Fetching transactions..."):
+                transactions = get_transactions(wallet_address)
+                
+            with st.spinner("Analyzing connected wallets... (This takes a while since the free solana api has harsh rate limits, sorry)"):
+                connected_wallets = get_connected_wallets(transactions)
+                connected_wallets = connected_wallets[connected_wallets['wallet'] != wallet_address]
+                
+            with st.spinner("Building graph..."):
+                streamlit_graph(wallet_address, connected_wallets)
+                
+            # Display connected wallets as a table
+            st.subheader("Connected Wallets")
+            connected_wallets_sorted = connected_wallets.sort_values('transactions', ascending=False)
+            display_df = connected_wallets_sorted.copy()
+            display_df['sql_change'] = display_df['sql_change'].apply(lambda x: f"{x/1e9:.3f} SOL")
+            display_df['token_change'] = display_df['token_change'].apply(lambda x: ', '.join([f"{amount:.3f} {mint}" for mint, amount in x.items()]) if x else '')
+            display_df.columns = ["Wallet", "Interactions", "SOL Change", "Token Changes"]
+            st.dataframe(display_df)
+    except Exception as e:
+        st.error(str(e))
 
 def test(wallet_address):
     transactions = get_transactions(wallet_address)
